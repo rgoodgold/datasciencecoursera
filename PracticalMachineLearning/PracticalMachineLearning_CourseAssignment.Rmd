@@ -1,0 +1,162 @@
+---
+title: "Practical Machine Learning Course Assignment"
+author: "Rachel Goodgold"
+date: "November 1, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(randomForest)
+```
+
+## Background
+Using devices such as JawboneUp, NikeFuelBand, and Fitbitit is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+   
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).   
+
+## Loading the data
+
+```{r}
+# Download the labeled data set if is not already in the working directory
+if (file.exists("pmldata.csv")) {  
+    message("Data already downloaded") 
+    } else {message("Downloading data") 
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                  "pmldata.csv")
+}
+
+# Load the data into R
+pmldata <- read.csv("pmldata.csv", na.strings=c("NA","#DIV/0!", ""))
+dim(pmldata)
+```
+
+There are a total of 19622 observations and 160 columns in the labelled dataset. This dataset will be used to build and test the model.
+
+```{r}
+# Download the unlabeled data if is not already in the working directory
+if (file.exists("validation.csv")) {  
+    message("Data already downloaded") 
+    } else {message("Downloading data") 
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                  "validation.csv")
+}
+
+# Load the data into R
+validation <- read.csv("validation.csv", na.strings=c("NA","#DIV/0!", ""))
+dim(validation)
+```
+
+The validation dataset has 20 observations and 160 columns. This dataset will be used to cross-validate the model.
+
+## Cleaning the data
+
+In this step, we will clean the dataset and get rid of observations with missing values as well as some meaningless variables.  
+
+### Removing Near Zero Variance variables  
+```{r}
+NZV <- nearZeroVar(pmldata, saveMetrics = TRUE)
+head(NZV, 20)
+pmldata <- pmldata[, !NZV$nzv]
+validation <- validation[, !NZV$nzv]
+dim(pmldata)
+dim(validation)
+```  
+The data sets now have 124 columns
+
+### Removing unnecessary columns  
+```{r}
+regex <- grepl("^X|timestamp|user_name", names(pmldata))
+pmldata <- pmldata[, !regex]
+validation <- validation[, !regex]
+dim(pmldata)
+dim(validation)
+```  
+The data sets now have 119 columns
+
+### Removing columns that contain NA's  
+```{r}
+cond <- (colSums(is.na(pmldata)) == 0)
+pmldata <- pmldata[, cond]
+validation <- validation[, cond]
+dim(pmldata)
+dim(validation)
+```  
+
+Now, the labeled data set contains 19622 observations and 54 variables, while the unlabeled data set contains 20 observations and 54 variables.  
+
+## Partitioning the labeled data set 
+We split the cleaned labeled data set into a training data set (70%) and a testing data set (30%). We will use the validation data set to conduct cross-validation in future steps.  
+```{r}
+set.seed(41894)
+inTrain <- createDataPartition(pmldata$classe, p = 0.70, list = FALSE)
+training <- pmldata[inTrain, ]
+testing <- pmldata[-inTrain, ]
+```  
+The Dataset now consists of 54 variables with the observations divided as following:  
+1. Training Data: 13737 observation  
+2. Testing Data: 5885 observations.  
+3. Validation Data: 20 observations.  
+
+## Data Modeling  
+
+### Decision Tree  
+We fit a predictive model for activity recognition using the decision tree algorithm 
+```{r}
+modelTree <- rpart(classe ~ ., data = training, method = "class")
+prp(modelTree)
+```  
+
+Now, we estimate the performance of the model on the testing data set.  
+```{r}
+predictTree <- predict(modelTree, testing, type = "class")
+confusionMatrix(testing$classe, predictTree)
+accuracy <- postResample(predictTree, testing$classe)
+ose <- 1 - as.numeric(confusionMatrix(testing$classe, predictTree)$overall[1])
+```  
+
+The Estimated Accuracy of the Random Forest Model is 74.36% and the Estimated Out-of-Sample Error is 25.64%.  
+
+### Random Forest
+We fit a predictive model for activity recognition using the random forest algorithm because it automatically selects important variables and is robust to correlated covariates & outliers in general.  
+We will use 5-fold cross validation when applying the algorithm.  
+```{r}
+modelRF <- train(classe ~ ., data = training, method = "rf", trControl = trainControl(method = "cv", 5), ntree = 250)
+modelRF
+```  
+
+Now, we estimate the performance of the model on the testing data set.  
+```{r}
+predictRF <- predict(modelRF, testing)
+confusionMatrix(testing$classe, predictRF)
+accuracy <- postResample(predictRF, testing$classe)
+ose <- 1 - as.numeric(confusionMatrix(testing$classe, predictRF)$overall[1])
+```  
+
+The Estimated Accuracy of the Random Forest Model is 99.76% and the Estimated Out-of-Sample Error is 0.24%. The Random Forests yielded better results, as expected!  
+
+## Predicting The Manner of Exercise for the Validation Data Set  
+Now, we apply the random forest model to the validation data set. We remove the problem_id column first.  
+```{r}
+rm(accuracy)
+rm(ose)
+predict(modelRF, validation[, -length(names(validation))])
+```  
+
+## Generating Files to submit as answers for the Assignment  
+ 
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("Problem_ID_",i,".txt")
+    write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}
+
+pml_write_files(predict(modelRF, validation[, -length(names(validation))]))
+```  
