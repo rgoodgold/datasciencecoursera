@@ -1,0 +1,19 @@
+library(shiny) 
+
+BMI<-function(weight,height) {(weight*0.45)/((height*0.025)^2)}
+
+BMI_range<-function(weight,height){
+    BMI_value<-(weight*0.45)/((height*0.025)^2)
+    ifelse(BMI_value<18.5,"underweight",
+           ifelse(BMI_value<25,"normal weight",
+                  ifelse(BMI_value<30,"overweight","obese")))
+}
+
+shinyServer(
+    function(input, output) {
+        output$inputweightvalue <- renderPrint({input$weight})
+        output$inputheightvalue <- renderPrint({input$height})
+        output$estimation <- renderPrint({BMI(input$weight,input$height)})
+        output$diagnostic <- renderPrint({BMI_range(input$weight,input$height)})
+    } 
+)
